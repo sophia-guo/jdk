@@ -198,7 +198,7 @@ jobs:
       - name: Persist test bundles
         uses: actions/upload-artifact@v2
         with:
-          name: transient_jdk-linux-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-linux-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: |
             jdk/build/linux-x64/bundles/jdk-${{ env.JDK_VERSION }}-internal+0_linux-x64_bin${{ matrix.artifact }}.tar.gz
             jdk/build/linux-x64/bundles/jdk-${{ env.JDK_VERSION }}-internal+0_linux-x64_bin-tests${{ matrix.artifact }}.tar.gz
@@ -224,6 +224,8 @@ jobs:
           - hs/tier1 gc
           - hs/tier1 runtime
           - hs/tier1 serviceability
+          - run-aqa system
+          - run-aqa functional
         include:
           - test: jdk/tier1 part 1
             suites: test/jdk/:tier1_part1
@@ -248,6 +250,12 @@ jobs:
           - test: hs/tier1 serviceability
             suites: test/hotspot/jtreg/:tier1_serviceability
             artifact: -debug
+          - test: run-aqa system
+            build_list: system
+            target: _sanity
+          - test: run-aqa functional
+            build_list: functional
+            target: _sanity
 
     env:
       JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).DEFAULT_VERSION_FEATURE }}"
@@ -295,14 +303,14 @@ jobs:
         id: build_restore
         uses: actions/download-artifact@v2
         with:
-          name: transient_jdk-linux-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-linux-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: ~/jdk-linux-x64${{ matrix.artifact }}
         continue-on-error: true
 
       - name: Restore build artifacts (retry)
         uses: actions/download-artifact@v2
         with:
-          name: transient_jdk-linux-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-linux-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: ~/jdk-linux-x64${{ matrix.artifact }}
         if: steps.build_restore.outcome == 'failure'
 
@@ -321,7 +329,8 @@ jobs:
           imageroot=`find ${HOME}/jdk-linux-x64${{ matrix.artifact }}/jdk-${{ env.JDK_VERSION }}-internal+0_linux-x64_bin${{ matrix.artifact }} -name release -type f`
           echo "imageroot=`dirname ${imageroot}`" >> $GITHUB_ENV
 
-      - name: Run tests
+      - name: Run jdk tests
+        if: "!contains(matrix.test, 'run-aqa')"
         run: >
           JDK_IMAGE_DIR=${{ env.imageroot }}
           TEST_IMAGE_DIR=${HOME}/jdk-linux-x64${{ matrix.artifact }}/jdk-${{ env.JDK_VERSION }}-internal+0_linux-x64_bin-tests${{ matrix.artifact }}
@@ -336,25 +345,42 @@ jobs:
           JTREG_KEYWORDS="!headful"
           JTREG="JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash"
 
-      - name: Check that all tests executed successfully
-        if: always()
+      - name: run-aqa tests
+        if: contains(matrix.test, 'run-aqa')
+        uses: AdoptOpenJDK/run-aqa@v1
+        with:
+         build_list: ${{ matrix.build_list }}
+         target: ${{ matrix.target}}
+         version: ${{ env.JDK_VERSION }}
+        env:
+          TEST_JDK_HOME: ${{ env.imageroot }}
+
+      - name: Check that all jdk tests executed successfully
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         run: >
           if ! grep --include=test-summary.txt -lqr build/*/test-results -e "TEST SUCCESS" ; then
             cat build/*/test-results/*/text/newfailures.txt ;
             exit 1 ;
           fi
 
-      - name: Create suitable test log artifact name
-        if: always()
+      - name: Create suitable jdk test log artifact name
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         run: echo "logsuffix=`echo ${{ matrix.test }} | sed -e 's!/!_!'g -e 's! !_!'g`" >> $GITHUB_ENV
 
-      - name: Persist test logs
-        if: always()
+      - name: Persist jdk test logs
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         uses: actions/upload-artifact@v2
         with:
           name: linux-x64${{ matrix.artifact }}_testlogs_${{ env.logsuffix }}
           path: build/*/test-results
         continue-on-error: true
+          
+      - name: Persist run-aqa test
+        if: failure() && contains(matrix.test, 'run-aqa')
+        uses: actions/upload-artifact@v2
+        with:
+          name: linux-x64_runaqa_${{ matrix.build_list}}_${{ matrix.target}}_test_output
+          path: ./**/test_output_*/
 
   windows_x64_build:
     name: Windows x64
@@ -464,7 +490,7 @@ jobs:
       - name: Persist test bundles
         uses: actions/upload-artifact@v2
         with:
-          name: transient_jdk-windows-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-windows-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: |
             jdk/build/windows-x64/bundles/jdk-${{ env.JDK_VERSION }}-internal+0_windows-x64_bin${{ matrix.artifact }}.zip
             jdk/build/windows-x64/bundles/jdk-${{ env.JDK_VERSION }}-internal+0_windows-x64_bin-tests${{ matrix.artifact }}.tar.gz
@@ -473,7 +499,7 @@ jobs:
 
   windows_x64_test:
     name: Windows x64
-    runs-on: "windows-latest"
+    runs-on: "windows-lastest"
     needs:
       - prerequisites
       - windows_x64_build
@@ -491,6 +517,8 @@ jobs:
           - hs/tier1 gc
           - hs/tier1 runtime
           - hs/tier1 serviceability
+          - run-aqa system
+          - run-aqa functional
         include:
           - test: jdk/tier1 part 1
             suites: test/jdk/:tier1_part1
@@ -515,6 +543,12 @@ jobs:
           - test: hs/tier1 serviceability
             suites: test/hotspot/jtreg/:tier1_serviceability
             artifact: -debug
+          - test: run-aqa system
+            build_list: system
+            target: _sanity
+          - test: run-aqa functional
+            build_list: functional
+            target: _sanity
 
     env:
       JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).DEFAULT_VERSION_FEATURE }}"
@@ -576,14 +610,14 @@ jobs:
         id: build_restore
         uses: actions/download-artifact@v2
         with:
-          name: transient_jdk-windows-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-windows-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: ~/jdk-windows-x64${{ matrix.artifact }}
         continue-on-error: true
 
       - name: Restore build artifacts (retry)
         uses: actions/download-artifact@v2
         with:
-          name: transient_jdk-windows-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-windows-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: ~/jdk-windows-x64${{ matrix.artifact }}
         if: steps.build_restore.outcome == 'failure'
 
@@ -605,7 +639,8 @@ jobs:
       - name: Find root of jdk image dir
         run: echo ("imageroot=" + (Get-ChildItem -Path $HOME/jdk-windows-x64${{ matrix.artifact }}/jdk-${{ env.JDK_VERSION }}-internal+0_windows-x64_bin${{ matrix.artifact }} -Filter release -Recurse -ErrorAction SilentlyContinue -Force).DirectoryName) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
 
-      - name: Run tests
+      - name: Run jdk tests
+        if: "!contains(matrix.test, 'run-aqa')"
         run: >
           $env:Path = "$HOME\cygwin\cygwin64\bin;$HOME\cygwin\cygwin64\bin;$env:Path" ;
           $env:Path = $env:Path -split ";" -match "C:\\Windows|PowerShell|cygwin" -join ";" ;
@@ -623,25 +658,42 @@ jobs:
           JTREG_KEYWORDS="!headful"
           JTREG="JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash"
 
-      - name: Check that all tests executed successfully
-        if: always()
+      - name: run-aqa tests
+        if: contains(matrix.test, 'run-aqa')
+        uses: AdoptOpenJDK/run-aqa@v1
+        with:
+         build_list: ${{ matrix.build_list }}
+         target: ${{ matrix.target}}
+         version: ${{ env.JDK_VERSION }}
+        env:
+          TEST_JDK_HOME: ${{ env.imageroot }}
+
+      - name: Check that all jdk tests executed successfully
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         run: >
           if ((Get-ChildItem -Path build\*\test-results\test-summary.txt -Recurse | Select-String -Pattern "TEST SUCCESS" ).Count -eq 0) {
             Get-Content -Path build\*\test-results\*\*\newfailures.txt ;
             exit 1
           }
 
-      - name: Create suitable test log artifact name
-        if: always()
+      - name: Create suitable jdk test log artifact name
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         run: echo ("logsuffix=" + ("${{ matrix.test }}" -replace "/", "_" -replace " ", "_")) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
 
-      - name: Persist test logs
-        if: always()
+      - name: Persist jdk test logs
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         uses: actions/upload-artifact@v2
         with:
           name: windows-x64${{ matrix.artifact }}_testlogs_${{ env.logsuffix }}
           path: build/*/test-results
         continue-on-error: true
+
+      - name: Persist run-aqa test
+        if: failure() && contains(matrix.test, 'run-aqa')
+        uses: actions/upload-artifact@v2
+        with:
+          name: windows-x64_runaqa_${{ matrix.build_list}}_${{ matrix.target}}_test_output
+          path: ./**/test_output_*/
 
   macos_x64_build:
     name: macOS x64
@@ -737,7 +789,7 @@ jobs:
       - name: Persist test bundles
         uses: actions/upload-artifact@v2
         with:
-          name: transient_jdk-macos-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-macos-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: |
             jdk/build/macos-x64/bundles/jdk-${{ env.JDK_VERSION }}-internal+0_osx-x64_bin${{ matrix.artifact }}.tar.gz
             jdk/build/macos-x64/bundles/jdk-${{ env.JDK_VERSION }}-internal+0_osx-x64_bin-tests${{ matrix.artifact }}.tar.gz
@@ -763,6 +815,8 @@ jobs:
           - hs/tier1 gc
           - hs/tier1 runtime
           - hs/tier1 serviceability
+          - run-aqa system
+          - run-aqa functional
         include:
           - test: jdk/tier1 part 1
             suites: test/jdk/:tier1_part1
@@ -787,6 +841,12 @@ jobs:
           - test: hs/tier1 serviceability
             suites: test/hotspot/jtreg/:tier1_serviceability
             artifact: -debug
+          - test: run-aqa system
+            build_list: system
+            target: _sanity
+          - test: run-aqa functional
+            build_list: functional
+            target: _sanity
 
     env:
       JDK_VERSION: "${{ fromJson(needs.prerequisites.outputs.dependencies).DEFAULT_VERSION_FEATURE }}"
@@ -834,14 +894,14 @@ jobs:
         id: build_restore
         uses: actions/download-artifact@v2
         with:
-          name: transient_jdk-macos-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-macos-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: ~/jdk-macos-x64${{ matrix.artifact }}
         continue-on-error: true
 
       - name: Restore build artifacts (retry)
         uses: actions/download-artifact@v2
         with:
-          name: transient_jdk-macos-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
+          name: jdk-macos-x64${{ matrix.artifact }}_${{ needs.prerequisites.outputs.bundle_id }}
           path: ~/jdk-macos-x64${{ matrix.artifact }}
         if: steps.build_restore.outcome == 'failure'
 
@@ -863,7 +923,8 @@ jobs:
           imageroot=`find ${HOME}/jdk-macos-x64${{ matrix.artifact }}/jdk-${{ env.JDK_VERSION }}-internal+0_osx-x64_bin${{ matrix.artifact }} -name release -type f`
           echo "imageroot=`dirname ${imageroot}`" >> $GITHUB_ENV
 
-      - name: Run tests
+      - name: Run jdk tests
+        if: "!contains(matrix.test, 'run-aqa')"
         run: >
           JDK_IMAGE_DIR=${{ env.imageroot }}
           TEST_IMAGE_DIR=${HOME}/jdk-macos-x64${{ matrix.artifact }}/jdk-${{ env.JDK_VERSION }}-internal+0_osx-x64_bin-tests${{ matrix.artifact }}
@@ -878,26 +939,42 @@ jobs:
           JTREG_KEYWORDS="!headful"
           JTREG="JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash"
 
-      - name: Check that all tests executed successfully
-        if: always()
+      - name: run-aqa tests
+        if: contains(matrix.test, 'run-aqa')
+        uses: AdoptOpenJDK/run-aqa@v1
+        with:
+         build_list: ${{ matrix.build_list }}
+         target: ${{ matrix.target}}
+         version: ${{ env.JDK_VERSION }}
+        env:
+          TEST_JDK_HOME: ${{ env.imageroot }}
+
+      - name: Check that all jdk tests executed successfully
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         run: >
           if ! grep --include=test-summary.txt -lqr build/*/test-results -e "TEST SUCCESS" ; then
             cat build/*/test-results/*/text/newfailures.txt ;
             exit 1 ;
           fi
 
-      - name: Create suitable test log artifact name
-        if: always()
+      - name: Create suitable jdk test log artifact name
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         run: echo "logsuffix=`echo ${{ matrix.test }} | sed -e 's!/!_!'g -e 's! !_!'g`" >> $GITHUB_ENV
 
-      - name: Persist test logs
-        if: always()
+      - name: Persist jdk test logs
+        if: "always() && !contains(matrix.test, 'run-aqa')"
         uses: actions/upload-artifact@v2
         with:
           name: macos-x64${{ matrix.artifact }}_testlogs_${{ env.logsuffix }}
           path: build/*/test-results
         continue-on-error: true
 
+      - name: Persist run-aqa test
+        if: failure() && contains(matrix.test, 'run-aqa')
+        uses: actions/upload-artifact@v2
+        with:
+          name: macos-x64_runaqa_${{ matrix.build_list}}_${{ matrix.target}}_test_output
+          path: ./**/test_output_*/
   artifacts:
     name: Post-process artifacts
     runs-on: "ubuntu-latest"
@@ -932,26 +1009,3 @@ jobs:
           -H 'Authorization: Bearer ${{ fromJson(steps.actions_runtime.outputs.result).token }}'
           -X DELETE "${url}";
           done
-
-      - name: Fetch remaining artifacts (test results)
-        uses: actions/download-artifact@v2
-        with:
-          path: test-results
-
-      - name: Delete remaining artifacts
-        run: >
-          for url in `
-          curl -s -H 'Accept: application/json;api-version=6.0-preview'
-          -H 'Authorization: Bearer ${{ fromJson(steps.actions_runtime.outputs.result).token }}'
-          '${{ fromJson(steps.actions_runtime.outputs.result).url }}_apis/pipelines/workflows/${{ github.run_id }}/artifacts?api-version=6.0-preview' |
-          jq -r -c '.value | .[].url'`; do
-          curl -s -H 'Accept: application/json;api-version=6.0-preview'
-          -H 'Authorization: Bearer ${{ fromJson(steps.actions_runtime.outputs.result).token }}'
-          -X DELETE "${url}";
-          done
-
-      - name: Upload a combined test results artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-results_${{ needs.prerequisites.outputs.bundle_id }}
-          path: test-results
