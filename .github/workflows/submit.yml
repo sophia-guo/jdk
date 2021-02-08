@@ -53,20 +53,17 @@ jobs:
         run: "echo '${{ steps.check_deps.outputs.dependencies }}'"
         if: steps.check_submit.outputs.should_run != 'false'
 
-      - name: Checkout the jtreg source
-        uses: actions/checkout@v2
-        with:
-          repository: "openjdk/jtreg"
-          path: jtreg
-
-      - name: Build jtreg
-        run: sh make/build-all.sh ${JAVA_HOME_8_X64}
-        working-directory: jtreg
+      - name: Download jtreg
+        run: |
+          wget https://ci.adoptopenjdk.net/view/Test_grinder/job/UploadFile/24/artifact/upload/jtreg.tar.gz
+          tar xzf jtreg.tar.gz
+          ls
+          mv ./jtregwithJcovams9 ./jtreg
 
       - name: Move jtreg image to destination folder
-        run: mv build/images/jtreg ~/
-        working-directory: jtreg
-        if: steps.check_submit.outputs.should_run != 'false' && steps.jtreg.outputs.cache-hit != 'true'
+        run: |
+          mv ./jtreg ~/
+          ls
 
       - name: Store jtreg for use by later steps
         uses: actions/upload-artifact@v2
